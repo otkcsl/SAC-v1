@@ -12,18 +12,45 @@ import os
 import csv
 import pandas as pd
 import time
+import ast
 
-task_name = 'Reacher-v4'
-buffer_alpha = 0.6
-gamma = 0.99
-tau = 0.005
-buffer_capacity=1000000
-batch_size=256
-lr = 0.0003
-max_steps = 500000
-test_interval = 1000
-episodes_per_test = 5
-use_per = False
+def parse_value(val):
+    try:
+        # 特別な処理：| 区切りなら float list として処理
+        if '|' in val:
+            return [float(x) for x in val.split('|')]
+        # 通常の eval（bool, int, float, list など）
+        return ast.literal_eval(val)
+    except (ValueError, SyntaxError):
+        return val  # 文字列のまま
+
+def load_params(path):
+    params = {}
+    with open(path, newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            key = row['key']
+            val = parse_value(row['value'])
+            params[key] = val
+    return params
+
+def save_params(params, filepath):
+    with open(filepath, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(['key', 'value'])
+        for key, value in params.items():
+            # リストの場合は '|' 区切りの文字列に変換
+            if isinstance(value, list):
+                value_str = '|'.join(str(v) for v in value)
+            else:
+                value_str = str(value)
+            writer.writerow([key, value_str])
+
+def save_to_csv(data, filename, headers):
+    with open(filename, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(headers)
+        writer.writerows(data)
     
 def hard_update(target, source):
     target.load_state_dict(source.state_dict())
@@ -31,12 +58,6 @@ def hard_update(target, source):
 def grad_false(network):
     for param in network.parameters():
         param.requires_grad = False
-
-def save_to_csv(data, filename, headers):
-    with open(filename, mode='w', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerow(headers)
-        writer.writerows(data)
         
 def average_over_intervals(data, interval_size):
     return [np.mean(data[i:i+interval_size]) for i in range(0, len(data), interval_size)]
@@ -143,17 +164,16 @@ class ReplayBuffer:
         return len(self.buffer)
 
 class ContinuousSACAgent:
-    def __init__(self, state_space, action_space, action_scale, alpha, gamma, tau, buffer_capacity, 
-                 batch_size, lr, use_per):
+    def __init__(self, state_space, action_space, action_scale, alpha, params):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.state_space = state_space
         self.action_space = action_space
         self.action_scale = action_scale
         self.alpha = alpha
-        self.lr = lr
-        self.gamma = gamma
-        self.tau = tau
-        self.batch_size = batch_size
+        self.lr = params['lr']
+        self.gamma = params['gamma']
+        self.tau = params['tau']
+        self.batch_size = params['batch_size']
         self.q1_losses = []
         self.q2_losses = []
         self.policy_losses = []
@@ -168,10 +188,10 @@ class ContinuousSACAgent:
         self.q_optimizer2 = optim.Adam(self.q_network2.parameters(), lr=self.lr)
         self.policy_optimizer = optim.Adam(self.policy_network.parameters(), lr=self.lr)
         
-        if use_per:
-            self.replay_buffer = PrioritizedReplayBuffer(buffer_capacity, buffer_alpha)
+        if params['use_per']:
+            self.replay_buffer = PrioritizedReplayBuffer(params['buffer_capacity'], params['buffer_alpha'])
         else:
-            self.replay_buffer = ReplayBuffer(buffer_capacity)
+            self.replay_buffer = ReplayBuffer(params['buffer_capacity'])
         
         # self.target_entropy = -torch.prod(torch.Tensor(action_space.shape).to(self.device)).item()
         # #self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
@@ -268,30 +288,28 @@ class ContinuousSACAgent:
         for target_param, param in zip(self.target_q_network2.parameters(), self.q_network2.parameters()):
             target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
 
-alpha_values = [0.00001, 0.0001, 0.001, 0.01, 0.1, 1.0]
-seeds = [2021, 2022, 2023, 2024, 2025, 2026]
+params = load_params("config/params.csv")
 
-num_trials = 1
-
-overall_result_dir = f"{task_name}_gridsearchsac_gamma{gamma}_tau{tau}_lr{lr}_use_per{use_per}_trials"
+overall_result_dir = f"SAC-v1_{params['task_name']}_gridsearch"
 if not os.path.exists(overall_result_dir):
     os.makedirs(overall_result_dir)
 
-for trial in range(1, num_trials + 1):
-    print(f"Trial {trial}/{num_trials}")
+for trial in range(params['trials']):
+    
+    print(f"Trial {trial}/{params['trials']}")
 
-    for alpha in alpha_values:
+    for alpha in params['alphas']:
         
-        for seed in seeds:
+        for seed in params['seeds']:
             
-            torch.manual_seed(seed)
-            np.random.seed(seed)
-            random.seed(seed)
-            torch.cuda.manual_seed(seed)
-            env = gym.make(task_name)
-            env.action_space.seed(seed)
-            env.observation_space.seed(seed)
-            env.reset(seed=seed)
+            torch.manual_seed(int(seed))
+            np.random.seed(int(seed))
+            random.seed(int(seed))
+            torch.cuda.manual_seed(int(seed))
+            env = gym.make(params['task_name'])
+            env.action_space.seed(int(seed))
+            env.observation_space.seed(int(seed))
+            env.reset(seed=int(seed))
             state_space = env.observation_space
             action_space = env.action_space
             torch.backends.cudnn.deterministic = True 
@@ -300,8 +318,8 @@ for trial in range(1, num_trials + 1):
             print(alpha)
             print(f"Starting training for alpha = {alpha} | Trial {trial}")
             
-            agent = ContinuousSACAgent(state_space=env.observation_space, action_space=env.action_space, action_scale=env.action_space.high[0],
-                                    alpha=alpha, gamma=gamma, tau=tau, buffer_capacity=buffer_capacity, batch_size=batch_size, lr=lr, use_per=use_per)
+            agent = ContinuousSACAgent(state_space=env.observation_space, action_space=env.action_space,\
+                                       action_scale=env.action_space.high[0], alpha=alpha, params = params)
             
             train_rewards = []
             test_rewards = []
@@ -311,7 +329,7 @@ for trial in range(1, num_trials + 1):
             
             start_time = time.time()
             
-            while total_steps < max_steps:
+            while total_steps < params['max_steps']:
                 state, _ = env.reset()
                 done = False
                 episode_reward = 0
@@ -328,9 +346,9 @@ for trial in range(1, num_trials + 1):
                     total_steps += 1
                     done = terminated or truncated
 
-                    if total_steps % test_interval == 0:
+                    if total_steps % params['test_interval'] == 0:
                         test_episode_rewards = []
-                        for _ in range(episodes_per_test):
+                        for _ in range(params['episodes_per_test']):
                             test_state, _ = env.reset()
                             test_done = False
                             test_reward = 0
@@ -345,7 +363,7 @@ for trial in range(1, num_trials + 1):
                         avg_test_reward = np.mean(test_episode_rewards)
                         test.append((total_steps, test_episode_rewards[0], test_episode_rewards[1], test_episode_rewards[2], test_episode_rewards[3], test_episode_rewards[4]))
                         test_rewards.append((total_steps, avg_test_reward))
-                        print(f"Alpha {alpha} | Trial {trial} | Steps: {total_steps}/{max_steps}, Avg Test Reward: {avg_test_reward}")
+                        print(f"Alpha {alpha} | Seed {seed} | Steps: {total_steps}/{params['max_steps']}, Avg Test Reward: {avg_test_reward}")
 
                 train_rewards.append(episode_reward)
             
@@ -418,13 +436,12 @@ for trial in range(1, num_trials + 1):
             plt.savefig(f"{seed_dir}/Losses_Trial_{trial}.png")
             plt.close()
 
-            all_parameter = [task_name, alpha, buffer_alpha, gamma, tau, buffer_capacity, batch_size, lr, max_steps, test_interval, episodes_per_test, use_per]
-            headers = ["task_name","alpha", "buffer_alpha", "gamma", "tau", "buffer_capacity", "batch_size", "lr", "max_steps", "test_interval", "episodes_per_test", "use_per"]
+            new_params = load_params("config/params.csv")
+    
+            new_params['seeds'] = seed
+            new_params['alphas'] = alpha
 
-            df = pd.DataFrame([all_parameter], columns=headers)
-
-            df.to_csv(f"{seed_dir}/all_parameter.csv", index=False)
-
+            save_params(new_params, f"{seed_dir}/params.csv")
 
 env.close()
 
@@ -436,21 +453,24 @@ with open(average_results_file, mode='w', newline='') as file:
     writer = csv.writer(file)
     writer.writerow(["Alpha", "Average_Test_Reward"])
 
-    for alpha in alpha_values:
-        total_rewards = []
-        for trial in range(1, num_trials + 1):
-            trial_dir = f"{overall_result_dir}/trial_{trial}/alpha_{alpha}"
-            rewards_file = f"{trial_dir}/Test_Returns_Trial_{trial}.csv"
-            
-            with open(rewards_file, 'r') as file:
-                reader = csv.reader(file)
-                next(reader)
-                rewards = [float(row[1]) for row in reader]
-                total_rewards.append(rewards)
-
-        avg_rewards = np.mean(total_rewards, axis=0)
-        alpha_averages[alpha] = avg_rewards
+    for alpha in params['alphas']:
         
-        writer.writerow(avg_rewards) 
+        for seed in params['seeds']:
+            
+            total_rewards = []
+            for trial in range(params['trials']):
+                trial_dir = f"{overall_result_dir}/trial_{trial}/alpha_{alpha}/seed_{seed}"
+                rewards_file = f"{trial_dir}/Test_Returns_Trial_{trial}.csv"
+                
+                with open(rewards_file, 'r') as file:
+                    reader = csv.reader(file)
+                    next(reader)
+                    rewards = [float(row[1]) for row in reader]
+                    total_rewards.append(rewards)
 
-        print(f"Alpha {alpha} | Average Test Rewards: {avg_rewards}")
+            avg_rewards = np.mean(total_rewards, axis=0)
+            alpha_averages[alpha] = avg_rewards
+            
+            writer.writerow(avg_rewards) 
+
+            print(f"Alpha {alpha} | Average Test Rewards: {avg_rewards}")
