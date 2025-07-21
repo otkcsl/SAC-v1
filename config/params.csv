@@ -1,0 +1,16 @@
+key,value
+task_name,Reacher-v4
+buffer_alpha,0.6
+gamma,0.99
+tau,0.005
+buffer_capacity,1000000
+batch_size,256
+lr,0.0003
+max_steps,500000
+test_interval,1000
+episodes_per_test,5
+window_size,100
+use_per,False
+seeds,2021|2022|2023|2024|2025
+alphas,0.0001|0.1
+trials,1
