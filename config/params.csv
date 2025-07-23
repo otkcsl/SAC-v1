@@ -12,5 +12,6 @@ episodes_per_test,5
 window_size,100
 use_per,False
 seeds,2021|2022|2023|2024|2025
-alphas,0.0001|0.1
+alphas,1.0|1.0
+SAC-v2,1|100
 trials,1

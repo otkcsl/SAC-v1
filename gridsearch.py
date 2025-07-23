@@ -164,7 +164,7 @@ class ReplayBuffer:
         return len(self.buffer)
 
 class ContinuousSACAgent:
-    def __init__(self, state_space, action_space, action_scale, alpha, params):
+    def __init__(self, state_space, action_space, action_scale, alpha, params, sacv2):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.state_space = state_space
         self.action_space = action_space
@@ -177,6 +177,7 @@ class ContinuousSACAgent:
         self.q1_losses = []
         self.q2_losses = []
         self.policy_losses = []
+        self.sacv2 = sacv2
         
         self.q_network1 = ContinuousQNetwork(state_space.shape[0] + action_space.shape[0], 1).to(self.device)
         self.q_network2 = ContinuousQNetwork(state_space.shape[0] + action_space.shape[0], 1).to(self.device)
@@ -193,10 +194,11 @@ class ContinuousSACAgent:
         else:
             self.replay_buffer = ReplayBuffer(params['buffer_capacity'])
         
-        # self.target_entropy = -torch.prod(torch.Tensor(action_space.shape).to(self.device)).item()
-        # #self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
-        # #self.alpha = self.log_alpha.exp()
-        # #self.alpha_optimizer = optim.Adam([self.log_alpha], lr=self.lr)
+        if self.sacv2:
+            self.target_entropy = -torch.prod(torch.Tensor(action_space.shape).to(self.device)).item()
+            self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
+            self.alpha = self.log_alpha.exp()
+            self.alpha_optimizer = optim.Adam([self.log_alpha], lr=self.lr)
 
         self.update_target_networks(self.tau)
         
@@ -270,13 +272,14 @@ class ContinuousSACAgent:
         policy_loss.backward()
         self.policy_optimizer.step()
         
-        #alpha_loss = -(self.log_alpha * (log_probs + self.target_entropy).detach()).mean()
-        #self.alpha_optimizer.zero_grad()
-        #alpha_loss.backward()
-        #self.alpha_optimizer.step()
-        #self.alpha = self.log_alpha.exp()
+        if self.sacv2:
+            alpha_loss = -(self.log_alpha * (log_probs + self.target_entropy).detach()).mean()
+            self.alpha_optimizer.zero_grad()
+            alpha_loss.backward()
+            self.alpha_optimizer.step()
+            self.alpha = self.log_alpha.exp()
         
-        self.alpha_values.append(self.alpha) 
+        self.alpha_values.append(self.alpha)
         self.q1_losses.append(q1_loss.item())
         self.q2_losses.append(q2_loss.item())
         self.policy_losses.append(policy_loss.item())
@@ -298,7 +301,15 @@ for trial in range(params['trials']):
     
     print(f"Trial {trial}/{params['trials']}")
 
-    for alpha in params['alphas']:
+    for alpha_id in range(len(params['alphas'])):
+        
+        alpha = params['alphas'][alpha_id]
+        sacv2 = params['SAC-v2'][alpha_id]
+        
+        if sacv2 == 100:
+            sacv2 = True
+        else:
+            sacv2 = False
         
         for seed in params['seeds']:
             
@@ -319,7 +330,7 @@ for trial in range(params['trials']):
             print(f"Starting training for alpha = {alpha} | Trial {trial}")
             
             agent = ContinuousSACAgent(state_space=env.observation_space, action_space=env.action_space,\
-                                       action_scale=env.action_space.high[0], alpha=alpha, params = params)
+                                       action_scale=env.action_space.high[0], alpha=alpha, params = params, sacv2=sacv2)
             
             train_rewards = []
             test_rewards = []
@@ -349,7 +360,7 @@ for trial in range(params['trials']):
                     if total_steps % params['test_interval'] == 0:
                         test_episode_rewards = []
                         for _ in range(params['episodes_per_test']):
-                            test_state, _ = env.reset()
+                            test_state, _ = env.reset(seed=int(seed))
                             test_done = False
                             test_reward = 0
                             while not test_done:
@@ -376,14 +387,21 @@ for trial in range(params['trials']):
             if not os.path.exists(trial_dir):
                 os.makedirs(trial_dir)
 
-            alpha_dir = f"{trial_dir}/alpha_{alpha}"
-            if not os.path.exists(alpha_dir):
-                os.makedirs(alpha_dir)
+            if sacv2 == True:
+                alpha_dir = f"{trial_dir}/sacv2_alpha_{alpha}"
+                if not os.path.exists(alpha_dir):
+                    os.makedirs(alpha_dir)
+            else:
+                alpha_dir = f"{trial_dir}/alpha_{alpha}"
+                if not os.path.exists(alpha_dir):
+                    os.makedirs(alpha_dir)
                 
             seed_dir = f"{alpha_dir}/seed_{seed}"
             if not os.path.exists(seed_dir):
                 os.makedirs(seed_dir)
 
+            save_to_csv([[agent.alpha_values]], f"{seed_dir}/alpha.csv", headers=["Alpha"])
+            
             save_to_csv([[total_time]], f"{seed_dir}/time.csv", headers=["Time"])
             
             save_to_csv(test, f"{seed_dir}/Test_Return.csv", headers=["Steps", "Test_Reward[0]", "Test_Reward[1]", "Test_Reward[2]", "Test_Reward[3]", "Test_Reward[4]"])
@@ -440,6 +458,7 @@ for trial in range(params['trials']):
     
             new_params['seeds'] = seed
             new_params['alphas'] = alpha
+            new_params['SAC-v2'] = sacv2
 
             save_params(new_params, f"{seed_dir}/params.csv")
 
