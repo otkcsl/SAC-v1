@@ -360,7 +360,7 @@ for trial in range(params['trials']):
                     if total_steps % params['test_interval'] == 0:
                         test_episode_rewards = []
                         for _ in range(params['episodes_per_test']):
-                            test_state, _ = env.reset(seed=int(seed))
+                            test_state, _ = env.reset()
                             test_done = False
                             test_reward = 0
                             while not test_done:
