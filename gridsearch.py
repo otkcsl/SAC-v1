@@ -279,7 +279,10 @@ class ContinuousSACAgent:
             self.alpha_optimizer.step()
             self.alpha = self.log_alpha.exp()
         
-        self.alpha_values.append(self.alpha)
+        if self.sacv2:
+            self.alpha_values.append(self.alpha.item())
+        else:
+            self.alpha_values.append(self.alpha)
         self.q1_losses.append(q1_loss.item())
         self.q2_losses.append(q2_loss.item())
         self.policy_losses.append(policy_loss.item())
