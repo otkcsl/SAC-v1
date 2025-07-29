@@ -343,7 +343,7 @@ for trial in range(params['trials']):
             start_time = time.time()
             
             while total_steps < params['max_steps']:
-                state, _ = env.reset()
+                state, _ = env.reset(seed=42 + total_steps)
                 done = False
                 episode_reward = 0
 
