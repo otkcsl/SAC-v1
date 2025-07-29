@@ -323,7 +323,6 @@ for trial in range(params['trials']):
             env = gym.make(params['task_name'])
             env.action_space.seed(int(seed))
             env.observation_space.seed(int(seed))
-            env.reset(seed=int(seed))
             state_space = env.observation_space
             action_space = env.action_space
             torch.backends.cudnn.deterministic = True 
