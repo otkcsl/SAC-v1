@@ -323,7 +323,6 @@ for trial in range(params['trials']):
             env = gym.make(params['task_name'])
             env.action_space.seed(int(seed))
             env.observation_space.seed(int(seed))
-            env.reset(seed=int(seed))
             state_space = env.observation_space
             action_space = env.action_space
             torch.backends.cudnn.deterministic = True 
@@ -344,7 +343,7 @@ for trial in range(params['trials']):
             start_time = time.time()
             
             while total_steps < params['max_steps']:
-                state, _ = env.reset()
+                state, _ = env.reset(seed=42 + total_steps)
                 done = False
                 episode_reward = 0
 
