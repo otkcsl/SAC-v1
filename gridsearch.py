@@ -14,6 +14,13 @@ import pandas as pd
 import time
 import ast
 
+cores = str(2)  
+os.environ["OMP_NUM_THREADS"] = cores # export OMP_NUM_THREADS=4
+os.environ["OPENBLAS_NUM_THREADS"] = cores # export OPENBLAS_NUM_THREADS=4 
+os.environ["MKL_NUM_THREADS"] = cores # export MKL_NUM_THREADS=6
+os.environ["VECLIB_MAXIMUM_THREADS"] = cores # export VECLIB_MAXIMUM_THREADS=4
+os.environ["NUMEXPR_NUM_THREADS"] = cores # export NUMEXPR_NUM_THREADS=6
+
 def parse_value(val):
     try:
         # 特別な処理：| 区切りなら float list として処理
@@ -316,15 +323,16 @@ for trial in range(params['trials']):
         
         for seed in params['seeds']:
             
+            env = gym.make(params['task_name'])
             torch.manual_seed(int(seed))
             np.random.seed(int(seed))
             random.seed(int(seed))
-            torch.cuda.manual_seed(int(seed))
-            env = gym.make(params['task_name'])
+            env.reset(seed)
             env.action_space.seed(int(seed))
             env.observation_space.seed(int(seed))
-            state_space = env.observation_space
-            action_space = env.action_space
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed(seed)
+                torch.cuda.manual_seed_all(seed)
             torch.backends.cudnn.deterministic = True 
             torch.backends.cudnn.benchmark = False
             
